@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 import pandas as pd
 
-from utils import preprocess
+from utils import preprocess, set_seed
 
 def trainModel(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -28,6 +28,15 @@ def testModel():
     
     pass
 
+
+def main(args):
+    """ 
+    main 函数定义了 *args, 这意味着你可以传递任意数量的参数给 main 函数.
+    这些参数会被打包成一个元组传递给 trainModel 函数
+    """
+    trainModel(args)
+    testModel()
+
 if __name__ == '__main__':
     set_seed(42)
     praser = argparse.ArgumentParser(description='Train the Multi-Task Model')
@@ -38,8 +47,7 @@ if __name__ == '__main__':
     praser.add_argument('--dataset', type=str, default='Al', help='the name of dataset')
     
     args = praser.parse_args() 
-     
-    trainModel(args)
-    testModel()
+    
+    main(args)
     
     
