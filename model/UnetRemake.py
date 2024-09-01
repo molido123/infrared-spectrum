@@ -157,14 +157,12 @@ class CBAM(nn.Module):
         return result
 
 
-class MMOe(nn.Module):
-    def __init__(self, n_expert=1, mmoe_hidden_dim=125, hidden_dim=[256, 64], dropouts=[0.1, 0.1], hidden_size=125,
-                 num_task=3,
-                 output_size=1, expert_activation=None, hidden_size_gate=125):
-        super(MMOe, self).__init__()
-        # # experts layer/shared layer
-        # self.experts = CNN_model
-        # 定义卷积层池化层
+class PLE(nn.Module):
+    def __init__(self, n_expert=1, ple_hidden_dim=125, hidden_dim=[256, 64], dropouts=[0.1, 0.1], hidden_size=125,
+                 num_task=3, output_size=1, expert_activation=None, hidden_size_gate=125):
+        super(PLE, self).__init__()
+
+        # Define convolutional and pooling layers (same as before)
         self.conv1 = DoubleConv(1, 32)
         self.att1 = CBAM(32, 1, 3)
         self.pool1 = nn.MaxPool1d(2)
@@ -211,7 +209,7 @@ class MMOe(nn.Module):
         # 31 -> 62
         self.up8 = nn.ConvTranspose1d(128, 64, 2, stride=2)
         self.conv8 = DoubleConv(128, 64)
-        # 62 -> 125
+
         self.up9 = nn.ConvTranspose1d(64, 32, 3, stride=2)
         self.conv9 = DoubleConv(128, 32)
         self.conv10 = DoubleConv(64, 32)
@@ -222,105 +220,77 @@ class MMOe(nn.Module):
         self.weights = torch.nn.Parameter(torch.ones(self.num_task).float())
 
         self.expert_activation = expert_activation
-        # experts
-        self.experts = torch.nn.Parameter(torch.rand(hidden_size, mmoe_hidden_dim, n_expert), requires_grad=True)
-        self.experts.data.normal_(0, 1)
-        self.experts_bias = torch.nn.Parameter(torch.rand(mmoe_hidden_dim, n_expert), requires_grad=True)
+        self.experts = nn.ModuleList()
 
-        # gates
-        self.gates = [torch.nn.Parameter(torch.rand(hidden_size_gate, n_expert).to(device), requires_grad=True) for _ in
-                      range(num_task)]
-        for gate in self.gates:
-            gate.data.normal_(0, 1)
-        self.gates_bias = [torch.nn.Parameter(torch.rand(n_expert).to(device), requires_grad=True) for _ in
-                           range(num_task)]
+        # Define the experts for each level of the PLE model
+        for i in range(self.num_task + 1):  # +1 for shared experts
+            expert_list = []
+            for j in range(n_expert):
+                expert_list.append(nn.Linear(hidden_size, ple_hidden_dim))
+            self.experts.append(nn.ModuleList(expert_list))
 
-        # Tower
+        self.shared_experts = nn.ModuleList([nn.Linear(hidden_size, ple_hidden_dim) for _ in range(n_expert)])
+
+        # Define task-specific towers
+        self.towers = nn.ModuleList()
         for i in range(self.num_task):
-            setattr(self, 'task_{}_dnn'.format(i + 1), nn.ModuleList())
-            hid_dim = [mmoe_hidden_dim] + hidden_dim
+            tower = nn.ModuleList()
+            hid_dim = [ple_hidden_dim] + hidden_dim
             for j in range(len(hid_dim) - 1):
-                getattr(self, 'task_{}_dnn'.format(i + 1)).add_module('ctr_hidden_{}'.format(j),
-                                                                      nn.Linear(hid_dim[j], hid_dim[j + 1]))
-                getattr(self, 'task_{}_dnn'.format(i + 1)).add_module('ctr_batchnorm_{}'.format(j),
-                                                                      nn.BatchNorm1d(hid_dim[j + 1]))
-                getattr(self, 'task_{}_dnn'.format(i + 1)).add_module('ctr_dropout_{}'.format(j),
-                                                                      nn.Dropout(dropouts[j]))
-            getattr(self, 'task_{}_dnn'.format(i + 1)).add_module('task_last_layer',
-                                                                  nn.Linear(hid_dim[-1], output_size))
+                tower.add_module('tower_hidden_{}'.format(j), nn.Linear(hid_dim[j], hid_dim[j + 1]))
+                tower.add_module('tower_batchnorm_{}'.format(j), nn.BatchNorm1d(hid_dim[j + 1]))
+                tower.add_module('tower_dropout_{}'.format(j), nn.Dropout(dropouts[j]))
+            tower.add_module('task_last_layer', nn.Linear(hid_dim[-1], output_size))
+            self.towers.append(tower)
 
-    def forward(self, x, y):  # x=[batchsize,125]
-        # mmoe
-        c1 = self.conv1(x)  ##32x32x125
-        # c11 = self.att1(c1)
+    def forward(self, x, y):
+        c1 = self.conv1(x)
         c11 = c1
-        p1 = self.pool1(c1)  # 32x32x62
-        # print(p1.shape)
-        c2 = self.conv2(p1)  # 32x64x62
-
+        p1 = self.pool1(c1)
+        c2 = self.conv2(p1)
         part4 = self.upsam1(c2)
-
-        # c22 = self.att2(c2)
         c22 = c2
-        p2 = self.pool2(c2)  # 32x64x31
-        # print(p2.shape)
-        c3 = self.conv3(p2)  # 32x128x31
-
+        p2 = self.pool2(c2)
+        c3 = self.conv3(p2)
         part5 = self.upsam2(c3)
-
-        # c33 = self.att3(c3)
-        p3 = self.pool3(c3)  # 32x128x15
-        # print(p3.shape)
-        c4 = self.conv4(p3)  # 32x256x15
-
+        p3 = self.pool3(c3)
+        c4 = self.conv4(p3)
         part6 = self.upsam3(c4)
+        p4 = self.pool4(c4)
+        c5 = self.conv5(p4)
 
-        # c44 = self.att4(c4)
-        p4 = self.pool4(c4)  # 32x256x7
-        # print(p4.shape)
-        c5 = self.conv5(p4)  # 32x512x7
-
-        # part1 = self.upsam3(c5)
-
-        up_6 = self.up6(c5)  # 32x32x15
-        merge6 = torch.cat([up_6, c4], dim=1)  # 拼接 32x512x15
-        c6 = self.conv6(merge6)  # 32x256x15
-
+        up_6 = self.up6(c5)
+        merge6 = torch.cat([up_6, c4], dim=1)
+        c6 = self.conv6(merge6)
         part2 = self.upsam4(c6)
 
-        up_7 = self.up7(c6)  # 32x128x31
-        merge7 = torch.cat([up_7, c3], dim=1)  # 32x256x31
-        c7 = self.conv7(merge7)  # 32x128x31
-
+        up_7 = self.up7(c6)
+        merge7 = torch.cat([up_7, c3], dim=1)
+        c7 = self.conv7(merge7)
         part3 = self.upsam5(c7)
 
-        up_8 = self.up8(c7)  # 32x64x62
-        merge8 = torch.cat([up_8, c22], dim=1)  # 32x128x62
-        c8 = self.conv8(merge8)  # 32x64x62
-        up_9 = self.up9(c8)  # 32x32x125
-        # merge9 = torch.cat([up_9, c11], dim=1)  #32x64x125
+        up_8 = self.up8(c7)
+        merge8 = torch.cat([up_8, c22], dim=1)
+        c8 = self.conv8(merge8)
+        up_9 = self.up9(c8)
 
-        concate = torch.cat([part2, part3, up_9, c11], dim=1)  # 32x128x125
-        # concate = torch.cat([up_9, c11], dim=1)  # 32x64x125
-
-        c9 = self.conv9(concate)  # 32x32x125
-        # c9 = self.conv10(concate)  # 32x32x125
-        # 加上一个注意力机制模块
-        x1 = self.last_layer(c9)  # 32x1x125
+        concate = torch.cat([part2, part3, up_9, c11], dim=1)
+        c9 = self.conv9(concate)
+        x1 = self.last_layer(c9)
         x1 = x1.view(x1.size(0), -1)
-        # experts_out = torch.einsum('ij, jkl -> ikl', x1, self.experts)  # [64,128,3]
-        # experts_out += self.experts_bias
-        # if self.expert_activation is not None:  # [32,256,1]
-        #     experts_out = self.expert_activation(experts_out)  # 共享层的最后一层输出
 
-        # task tower
-        task_outputs = list()
+        task_outputs = []
         for i in range(self.num_task):
-            shared_output = x1
-            # shared_output = torch.squeeze(shared_output, dim=2)
-            for mod in getattr(self, 'task_{}_dnn'.format(i + 1)):
-                shared_output = mod(shared_output)
-            task_outputs.append(shared_output)
+            experts_output = []
+            for expert in self.experts[i]:
+                experts_output.append(expert(x1))
+            shared_output = torch.stack([expert(x1) for expert in self.shared_experts], dim=2)
+
+            # Combine task-specific and shared experts
+            task_expert_output = torch.cat(experts_output + [shared_output.mean(dim=2)], dim=1)
+            for mod in self.towers[i]:
+                task_expert_output = mod(task_expert_output)
+            task_outputs.append(task_expert_output)
 
         task_loss = []
         for j in range(self.num_task):
@@ -335,3 +305,4 @@ class MMOe(nn.Module):
 
     def get_last_shared_layer(self):
         return self.last_layer
+
