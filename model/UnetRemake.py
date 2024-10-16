@@ -290,7 +290,7 @@ class PLE(nn.Module):
             # Combine task-specific and shared experts
             task_expert_output = torch.cat(experts_output + [shared_output.mean(dim=2)], dim=1)
             for mod in self.towers[i]:
-                print(task_expert_output.shape)
+                # print(task_expert_output.shape)
                 task_expert_output = mod(task_expert_output)
             task_outputs.append(task_expert_output)
 
