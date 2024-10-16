@@ -21,13 +21,13 @@ def splitData(data, label, ratio):
     trainData, testData, trainLabel, testLabel = train_test_split(data, label, test_size=ratio, random_state=42)
     return trainData, testData, trainLabel, testLabel
 
-def preprocess(trainData, trainLabel, testData, testLabel, device):
-    trainData, trainLabel, testData, testLabel = splitData(trainData, trainLabel, 0.2)
+def preprocess(trainData, trainLabel, device):
+    trainData, testData, trainLabel, testLabel = splitData(trainData, trainLabel, 0.2)
     
     scaler = StandardScaler()
     trainData = scaler.fit_transform(trainData)
     testData = scaler.transform(testData)
-    
+
     """ 
     在机器学习中，通常使用`fit`来计算训练数据的统计信息（例如均值和标准差），
     然后使用这些统计信息来对测试数据进行转换。因此，在给定的代码中，
@@ -39,9 +39,9 @@ def preprocess(trainData, trainLabel, testData, testLabel, device):
     """
     
     trainData = torch.from_numpy(trainData).float().to(device)
-    trainLabel = torch.from_numpy(trainLabel).float().to(device)
+    trainLabel = torch.from_numpy(trainLabel.values).float().to(device)
     testData = torch.from_numpy(testData).float().to(device)
-    testLabel = torch.from_numpy(testLabel).float().to(device)
+    testLabel = torch.from_numpy(testLabel.values).float().to(device)
     
     """save this scaler at local for prediction"""
     with open('scaler.pkl', 'wb') as f:

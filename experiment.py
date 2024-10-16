@@ -15,11 +15,11 @@ def trainModel(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Using {device}')
     
-    dataPath = f'./dataset/{args.dataset}_data.csv'
-    labelPath = f'./dataset/{args.dataset}_label.csv'
+    dataPath = f'./dataset/{args.dataset}_data.xlsx'
+    labelPath = f'./dataset/{args.dataset}_label.xlsx'
     
-    trainData = pd.read_csv(dataPath)
-    labelData = pd.read_csv(labelPath)
+    trainData = pd.read_excel(dataPath)
+    labelData = pd.read_excel(labelPath)
 
     trainData, trainLabel, testData, testLabel = preprocess(trainData, labelData, device)
 
@@ -127,7 +127,7 @@ def trainModel(args):
         testDataLoader = Data.DataLoader(dataset=testDataset, batch_size=args.batch_size, shuffle=True)
 
         # 初始化模型、损失函数、优化器和学习率调度器
-        mmoe = UnetRemake(tasks=args.tasks).to(device)
+        mmoe = UnetRemake.PLE(num_task=args.tasks).to(device)
         criterion = nn.L1Loss()
         optimizer = torch.optim.Adam(mmoe.parameters(), lr=args.lr)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=args.gamma)
@@ -266,7 +266,7 @@ if __name__ == '__main__':
     praser.add_argument('--batch_size', type=int, default=32, help='training batch size')
     praser.add_argument('--alpha', type=float, default=0.5, help='loss function weight')
     praser.add_argument('--gamma', type=float, default=0.1, help='scheduler gamma')
-    praser.add_argument('--dataset', type=str, default='Al', help='the name of dataset')
+    praser.add_argument('--dataset', type=str, default='all', help='the name of dataset')
 
     args = praser.parse_args()
 

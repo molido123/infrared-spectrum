@@ -243,7 +243,7 @@ class PLE(nn.Module):
             tower.add_module('task_last_layer', nn.Linear(hid_dim[-1], output_size))
             self.towers.append(tower)
 
-    def forward(self, x, y):
+    def forward(self, x):
         c1 = self.conv1(x)
         c11 = c1
         p1 = self.pool1(c1)
@@ -292,17 +292,18 @@ class PLE(nn.Module):
                 task_expert_output = mod(task_expert_output)
             task_outputs.append(task_expert_output)
 
-        task_loss = []
-        for j in range(self.num_task):
-            a = y[:, j]
-            a = torch.unsqueeze(a, dim=1)
-            task_loss.append(self.loss_fun(a, task_outputs[j]))
-        task_loss = torch.stack(task_loss)
+        # task_loss = []
+        # for j in range(self.num_task):
+        #     a = y[:, j]
+        #     a = torch.unsqueeze(a, dim=1)
+        #     task_loss.append(self.loss_fun(a, task_outputs[j]))
+        # task_loss = torch.stack(task_loss)
+        #
+        # weighted_task_loss = torch.mul(self.weights, task_loss)
 
-        weighted_task_loss = torch.mul(self.weights, task_loss)
+        # return weighted_task_loss, task_loss, task_outputs
 
-        return weighted_task_loss, task_loss, task_outputs
-
+        return task_outputs
     def get_last_shared_layer(self):
         return self.last_layer
 
