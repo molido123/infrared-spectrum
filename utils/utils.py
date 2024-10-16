@@ -22,6 +22,7 @@ def splitData(data, label, ratio):
     return trainData, testData, trainLabel, testLabel
 
 def preprocess(trainData, trainLabel, device):
+    trainData = SNV(trainData)
     trainData, testData, trainLabel, testLabel = splitData(trainData, trainLabel, 0.2)
     
     scaler = StandardScaler()
@@ -59,3 +60,9 @@ def calcCorr(a, b):
     
     corr_factor = cov_ab / sq
     return corr_factor
+
+def SNV(data):
+    data = np.array(data)
+    data_std = np.std(data, axis=1)
+    data_average = np.mean(data, axis=1)
+    return [[((value - avg) / std) for value in row] for row, avg, std in zip(data, data_average, data_std)]

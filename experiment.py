@@ -7,6 +7,7 @@ import torch.nn as nn
 import torch.utils.data as Data
 import pandas as pd
 
+from model.UnetRemake import PLE
 from utils.utils import calcCorr, preprocess, set_seed
 from model import UnetRemake
 
@@ -127,7 +128,7 @@ def trainModel(args):
         testDataLoader = Data.DataLoader(dataset=testDataset, batch_size=args.batch_size, shuffle=True)
 
         # 初始化模型、损失函数、优化器和学习率调度器
-        mmoe = UnetRemake.PLE(num_task=args.tasks).to(device)
+        mmoe = PLE(num_task=args.tasks).to(device)
         criterion = nn.L1Loss()
         optimizer = torch.optim.Adam(mmoe.parameters(), lr=args.lr)
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=args.gamma)
@@ -261,13 +262,13 @@ if __name__ == '__main__':
     set_seed(42)
     praser = argparse.ArgumentParser(description='Train the Multi-Task Model')
     praser.add_argument('--tasks', type=int, default=3, help='the number of tasks')
-    praser.add_argument('--lr', type=float, default=1e-3, help='training learning rate')
+    praser.add_argument('--lr', type=float, default=1e-2, help='training learning rate')
     praser.add_argument('--epoch', type=int, default=250, help='training epoch')
     praser.add_argument('--batch_size', type=int, default=32, help='training batch size')
     praser.add_argument('--alpha', type=float, default=0.5, help='loss function weight')
-    praser.add_argument('--gamma', type=float, default=0.1, help='scheduler gamma')
+    praser.add_argument('--gamma', type=float, default=0.9, help='scheduler gamma')
     praser.add_argument('--dataset', type=str, default='all', help='the name of dataset')
-    praser.add_argument('--mode', type=str, default='grad_norm', help='set the grad_norm mode')
+    praser.add_argument('--mode', type=str, choices=('grad_norm', 'equal_weight'), default='grad_norm', help='set the grad_norm mode')
 
     args = praser.parse_args()
 
