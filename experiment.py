@@ -267,6 +267,7 @@ if __name__ == '__main__':
     praser.add_argument('--alpha', type=float, default=0.5, help='loss function weight')
     praser.add_argument('--gamma', type=float, default=0.1, help='scheduler gamma')
     praser.add_argument('--dataset', type=str, default='all', help='the name of dataset')
+    praser.add_argument('--mode', type=str, default='grad_norm', help='set the grad_norm mode')
 
     args = praser.parse_args()
 

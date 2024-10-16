@@ -235,7 +235,8 @@ class PLE(nn.Module):
         self.towers = nn.ModuleList()
         for i in range(self.num_task):
             tower = nn.ModuleList()
-            hid_dim = [ple_hidden_dim] + hidden_dim
+            # hid_dim = [ple_hidden_dim] + hidden_dim
+            hid_dim = [ple_hidden_dim * (n_expert + 1)] + hidden_dim
             for j in range(len(hid_dim) - 1):
                 tower.add_module('tower_hidden_{}'.format(j), nn.Linear(hid_dim[j], hid_dim[j + 1]))
                 tower.add_module('tower_batchnorm_{}'.format(j), nn.BatchNorm1d(hid_dim[j + 1]))
@@ -289,6 +290,7 @@ class PLE(nn.Module):
             # Combine task-specific and shared experts
             task_expert_output = torch.cat(experts_output + [shared_output.mean(dim=2)], dim=1)
             for mod in self.towers[i]:
+                print(task_expert_output.shape)
                 task_expert_output = mod(task_expert_output)
             task_outputs.append(task_expert_output)
 
