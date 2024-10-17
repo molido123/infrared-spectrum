@@ -216,6 +216,24 @@ def trainModel(args):
 
             optimizer.zero_grad()
             loss.backward(retain_graph=True)
+
+            if args.mode == 'grad_norm':
+                W = mmoe.get_last_shared_layer()
+                norms = []
+                for j in range(args.tasks):
+                    gLgW = torch.autograd.grad(task_loss[j], W.parameters(), retain_graph=True)
+                    norms.append(torch.norm(torch.mul(mmoe.weights[j], gLgW[0])))
+                norms = torch.stack(norms)
+
+                loss_ratio = task_loss.detach().cpu().numpy() / initial_task_loss
+                inverse_train_rate = loss_ratio / np.mean(loss_ratio)
+
+                mean_norm = np.mean(norms.detach().cpu().numpy())
+                constant_term = torch.tensor(mean_norm * (inverse_train_rate ** args.alpha), requires_grad=True).to(
+                    device)
+                grad_norm_loss = torch.sum(torch.abs(norms - constant_term))
+                mmoe.weights.grad = torch.autograd.grad(grad_norm_loss, mmoe.weights)[0]
+
             optimizer.step()
 
             # 修正后的 total_loss 计算逻辑
@@ -299,8 +317,8 @@ def main(args):
     main 函数定义了 *args, 这意味着你可以传递任意数量的参数给 main 函数.
     这些参数会被打包成一个元组传递给 trainModel 函数
     """
-    trainModel(args)
-    # testModel(args)
+    # trainModel(args)
+    testModel(args)
 
 
 if __name__ == '__main__':
@@ -308,9 +326,9 @@ if __name__ == '__main__':
     praser = argparse.ArgumentParser(description='Train the Multi-Task Model')
     praser.add_argument('--tasks', type=int, default=3, help='the number of tasks')
     praser.add_argument('--lr', type=float, default=1e-2, help='training learning rate')
-    praser.add_argument('--epoch', type=int, default=5, help='training epoch')
+    praser.add_argument('--epoch', type=int, default=100, help='training epoch')
     praser.add_argument('--batch_size', type=int, default=32, help='training batch size')
-    praser.add_argument('--alpha', type=float, default=0.5, help='loss function weight')
+    praser.add_argument('--alpha', type=float, default=0.7, help='loss function weight')
     praser.add_argument('--gamma', type=float, default=0.9, help='scheduler gamma')
     praser.add_argument('--dataset', type=str, default='all', help='the name of dataset')
     praser.add_argument('--mode', type=str, choices=('grad_norm', 'equal_weight'), default='grad_norm', help='set the grad_norm mode')

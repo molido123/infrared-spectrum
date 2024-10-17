@@ -157,6 +157,69 @@ class CBAM(nn.Module):
         return result
 
 
+class SpectralSpatialAttention(nn.Module):
+    """
+    This class implements the spectral spatial attention mechanism.
+    It computes spatial attention across the spectral bands.
+    """
+
+    def __init__(self, kernel_size=3):
+        """
+        Initialize the SpectralSpatialAttention module.
+
+        Args:
+            kernel_size (int): Kernel size for the convolutional layer (used to capture dependencies).
+        """
+        super(SpectralSpatialAttention, self).__init__()
+
+        padding = kernel_size // 2  # Ensure same padding
+        self.conv1 = nn.Conv1d(2, 1, kernel_size=kernel_size, padding=padding, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        # Compute mean and max values along the spectral dimension
+        avg_out = torch.mean(x, dim=1, keepdim=True)
+        max_out, _ = torch.max(x, dim=1, keepdim=True)
+
+        # Concatenate average and max features and pass them through convolutional layer
+        concat_out = torch.cat([avg_out, max_out], dim=1)
+        attention_map = self.sigmoid(self.conv1(concat_out))
+
+        # Apply attention map to the input
+        return attention_map * x
+
+
+class SpectralChannelAttention(nn.Module):
+    """
+    This class implements the channel attention mechanism for spectral data.
+    It computes attention weights for each spectral band (channel).
+    """
+
+    def __init__(self, in_planes: int, ratio: int = 4) -> None:
+        """
+        Initialize the SpectralChannelAttention module.
+
+        Args:
+            in_planes (int): The number of input channels (spectral bands).
+            ratio (int): Reduction ratio for channel weights computation.
+        """
+        super(SpectralChannelAttention, self).__init__()
+
+        # Average pooling to compress spectral information
+        self.avg_pool = nn.AdaptiveAvgPool1d(1)
+
+        # Fully connected layers to compute attention weights
+        self.fc1 = nn.Conv1d(in_planes, in_planes // ratio, 1, bias=False)
+        self.relu1 = nn.ReLU()
+        self.fc2 = nn.Conv1d(in_planes // ratio, in_planes, 1, bias=False)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, x):
+        # Average pooling over the spectral bands
+        avg_out = self.fc2(self.relu1(self.fc1(self.avg_pool(x))))
+        return self.sigmoid(avg_out) * x  # Apply the attention weights to the input
+
+
 class PLE(nn.Module):
     def __init__(self, n_expert=1, ple_hidden_dim=125, hidden_dim=[256, 64], dropouts=[0.1, 0.1], hidden_size=125,
                  num_task=3, output_size=1, expert_activation=None, hidden_size_gate=125, num_encoder_layers=2,
@@ -166,24 +229,29 @@ class PLE(nn.Module):
         # 定义 Transformer Encoder 部分
         self.embedding_dim = 32  # 定义嵌入维度
         self.embedding_layer = nn.Conv1d(1, self.embedding_dim, kernel_size=1)
-
         encoder_layer = nn.TransformerEncoderLayer(d_model=self.embedding_dim, nhead=nhead, dim_feedforward=512, batch_first=True)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
 
         # 定义卷积层和池化层（同之前的模型结构）
-        self.conv1 = DoubleConv(self.embedding_dim, 32)  # 将输入调整为 embedding_dim 以适配 Transformer 的输出
-        self.att1 = CBAM(32, 1, 3)
+        self.conv1 = DoubleConv(1, 32)  # 将输入调整为 embedding_dim 以适配 Transformer 的输出
+        # self.att1 = CBAM(32, 1, 3)
+        self.spectral_ca1 = SpectralChannelAttention(32)  # 通道注意力
+        self.spectral_sa1 = SpectralSpatialAttention()    # 空间注意力
         self.pool1 = nn.MaxPool1d(2)
         self.conv2 = DoubleConv(32, 64)
 
         self.upsam1 = nn.ConvTranspose1d(64, 32, 3, stride=2)
 
-        self.att2 = CBAM(64, 1, 3)
+        # self.att2 = CBAM(64, 1, 3)
+        self.spectral_ca2 = SpectralChannelAttention(64)
+        self.spectral_sa2 = SpectralSpatialAttention()
         self.pool2 = nn.MaxPool1d(2)
         self.conv3 = DoubleConv(64, 128)
 
         self.upsam2 = nn.ConvTranspose1d(128, 32, 5, stride=4)
 
+        self.spectral_ca3 = SpectralChannelAttention(128)
+        self.spectral_sa3 = SpectralSpatialAttention()
         self.pool3 = nn.MaxPool1d(2)
         self.conv4 = DoubleConv(128, 256)
 
@@ -238,26 +306,30 @@ class PLE(nn.Module):
             self.towers.append(tower)
 
     def forward(self, x):
-        x = self.embedding_layer(x)
 
-        # 调整输入数据格式为 (sequence_length, batch_size, embedding_dim)
-        x = x.permute(2, 0, 1)  # 调整维度顺序为 (sequence_length, batch_size, channels)
-
-        # 使用 Transformer Encoder 进行特征提取
-        x = self.transformer_encoder(x)
-
-        # 调整回卷积层输入格式 (batch_size, embedding_dim, sequence_length)
-        x = x.permute(1, 2, 0)
+        # x = self.embedding_layer(x)
+        # # 调整输入数据格式为 (sequence_length, batch_size, embedding_dim)
+        # x = x.permute(2, 0, 1)  # 调整维度顺序为 (sequence_length, batch_size, channels)
+        # # 使用 Transformer Encoder 进行特征提取
+        # x = self.transformer_encoder(x)
+        # # 调整回卷积层输入格式 (batch_size, embedding_dim, sequence_length)
+        # x = x.permute(1, 2, 0)
 
         # 开始进入卷积部分
         c1 = self.conv1(x)
+        # c1 = self.spectral_ca1(c1)  # 通道注意力
+        # c1 = self.spectral_sa1(c1)  # 空间注意力
         c11 = c1
         p1 = self.pool1(c1)
         c2 = self.conv2(p1)
         part4 = self.upsam1(c2)
+        # c2 = self.spectral_ca2(c2)
+        # c2 = self.spectral_sa2(c2)
         c22 = c2
         p2 = self.pool2(c2)
         c3 = self.conv3(p2)
+        # c3 = self.spectral_ca3(c3)
+        # c3 = self.spectral_sa3(c3)
         part5 = self.upsam2(c3)
         p3 = self.pool3(c3)
         c4 = self.conv4(p3)
