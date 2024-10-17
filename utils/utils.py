@@ -22,12 +22,12 @@ def splitData(data, label, ratio):
     return trainData, testData, trainLabel, testLabel
 
 def preprocess(trainData, trainLabel, device):
-    trainData = SNV(trainData)
+    # trainData = SNV(trainData)
     trainData, testData, trainLabel, testLabel = splitData(trainData, trainLabel, 0.2)
     
-    scaler = StandardScaler()
-    trainData = scaler.fit_transform(trainData)
-    testData = scaler.transform(testData)
+    # scaler = StandardScaler()
+    # trainData = scaler.fit_transform(trainData)
+    # testData = scaler.transform(testData)
 
     """ 
     在机器学习中，通常使用`fit`来计算训练数据的统计信息（例如均值和标准差），
@@ -44,11 +44,12 @@ def preprocess(trainData, trainLabel, device):
     testData = torch.from_numpy(testData).float().to(device)
     testLabel = torch.from_numpy(testLabel.values).float().to(device)
     
-    """save this scaler at local for prediction"""
-    with open('scaler.pkl', 'wb') as f:
-        torch.save(scaler, f)
-    
-    return trainData, trainLabel, testData, testLabel
+    # """save this scaler at local for prediction"""
+    # with open('scaler.pkl', 'wb') as f:
+    #     torch.save(scaler, f)
+
+    # return trainData, trainLabel
+    return trainData, testData, trainLabel, testLabel
 
 def calcCorr(a, b):
     a_avg = sum(a) / len(a)

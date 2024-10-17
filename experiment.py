@@ -8,7 +8,7 @@ import torch.utils.data as Data
 import pandas as pd
 
 from model.UnetRemake import PLE
-from utils.utils import calcCorr, preprocess, set_seed,Test_preprocess
+from utils.utils import calcCorr, preprocess, set_seed, Test_preprocess, SNV
 from model import UnetRemake
 
 
@@ -22,7 +22,11 @@ def trainModel(args):
     trainData = pd.read_excel(dataPath)
     labelData = pd.read_excel(labelPath)
 
-    trainData, trainLabel, testData, testLabel = preprocess(trainData, labelData, device)
+    # trainData, trainLabel, testData, testLabel = preprocess(trainData, labelData, device)
+    # trainData, trainLabel = preprocess(trainData, labelData, device)
+    trainData = SNV(trainData)
+    trainData = np.array(trainData)
+    labelData = np.array(labelData)
 
     # TODO
 
@@ -46,7 +50,13 @@ def trainModel(args):
     # 交叉验证的循环
     for train_index, test_index in kf.split(trainData):
         # 为当前fold准备训练和测试数据
-        X_train, X_test, y_train, y_test = trainData[train_index], trainData[test_index], trainLabel[train_index], trainLabel[test_index]
+        X_train, X_test = trainData[train_index], trainData[test_index]
+        y_train, y_test = labelData[train_index], labelData[test_index]
+
+        X_train = torch.tensor(X_train, dtype=torch.float32)
+        X_test = torch.tensor(X_test, dtype=torch.float32)
+        y_train = torch.tensor(y_train, dtype=torch.float32)
+        y_test = torch.tensor(y_test, dtype=torch.float32)
 
         # 将训练和测试数据转换为TensorDataset和DataLoader
         trainDataset = Data.TensorDataset(X_train, y_train)
@@ -114,7 +124,7 @@ def trainModel(args):
                 # 修正后的 total_loss 计算逻辑
                 total_loss += torch.sum(task_loss).item() * b_x.size(0)
                 for j in range(args.tasks):
-                    R_task_train[j] += calcCorr(predict[j], b_y[:, j]).item() * b_x.size(0)
+                    R_task_train[j] += calcCorr(predict[j], b_y[:, j]).item() ** 2 * b_x.size(0)
                 count += b_x.size(0)
 
                 normalize_coeff = args.tasks / torch.sum(mmoe.weights.data, dim=0)
@@ -149,7 +159,7 @@ def trainModel(args):
                 loss_val = torch.sum(task_loss)
                 total_val_loss += torch.sum(task_loss).item() * b_x.size(0)
                 for j in range(args.tasks):
-                    R_task_val[j] += calcCorr(predict[j], b_y[:, j]).item() * b_x.size(0)
+                    R_task_val[j] += calcCorr(predict[j], b_y[:, j]).item() ** 2 * b_x.size(0)
                 count_val += b_x.size(0)
 
         print(f'Epoch {epoch + 1} - Validation Loss: {total_val_loss / count_val:.4f}')
@@ -170,7 +180,7 @@ def trainModel(args):
     print("Training final model with all data...")
 
     # 构建最终的 DataLoader 使用全部训练数据
-    fullDataset = Data.TensorDataset(trainData, trainLabel)
+    fullDataset = Data.TensorDataset(trainData, labelData)
     fullDataLoader = Data.DataLoader(dataset=fullDataset, batch_size=args.batch_size, shuffle=True)
 
     mmoe = PLE(num_task=args.tasks).to(device)
@@ -209,7 +219,7 @@ def trainModel(args):
             # 修正后的 total_loss 计算逻辑
             total_loss += torch.sum(task_loss).item() * b_x.size(0)
             for j in range(args.tasks):
-                R_task_train[j] += calcCorr(predict[j], b_y[:, j]).item() * b_x.size(0)
+                R_task_train[j] += calcCorr(predict[j], b_y[:, j]).item() ** 2 * b_x.size(0)
             count += b_x.size(0)
 
         scheduler.step()

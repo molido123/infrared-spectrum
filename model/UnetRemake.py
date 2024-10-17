@@ -160,7 +160,7 @@ class CBAM(nn.Module):
 class PLE(nn.Module):
     def __init__(self, n_expert=1, ple_hidden_dim=125, hidden_dim=[256, 64], dropouts=[0.1, 0.1], hidden_size=125,
                  num_task=3, output_size=1, expert_activation=None, hidden_size_gate=125, num_encoder_layers=2,
-                 nhead=8):
+                 nhead=2):
         super(PLE, self).__init__()
 
         # 定义 Transformer Encoder 部分
