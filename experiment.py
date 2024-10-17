@@ -8,7 +8,7 @@ import torch.utils.data as Data
 import pandas as pd
 
 from model.UnetRemake import PLE
-from utils.utils import calcCorr, preprocess, set_seed
+from utils.utils import calcCorr, preprocess, set_seed,Test_preprocess
 from model import UnetRemake
 
 
@@ -223,10 +223,45 @@ def trainModel(args):
             
 
 
-def testModel():
-    # TODO
+def testModel(input_data):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f'Testing on {device}')
+    input_data=Test_preprocess(input_data,device)
+    # 将数据转换为 TensorDataset 和 DataLoader
+    testDataset = Data.TensorDataset(input_data)
+    testDataLoader = Data.DataLoader(dataset=testDataset, batch_size=args.batch_size, shuffle=False)
 
-    pass
+    # 初始化模型，假设模型结构和训练时一致
+    mmoe = PLE(num_task=args.tasks).to(device)
+
+    # 加载训练好的模型权重
+    checkpoint_path = './checkpoint/model_final.pth'
+    mmoe.load_state_dict(torch.load(checkpoint_path, map_location=device))
+
+    # 设置模型为评估模式
+    mmoe.eval()
+
+    predictions = []
+
+    # 对测试数据进行前向传播，获取预测结果
+    with torch.no_grad():
+        for idx, (b_x,) in enumerate(testDataLoader):
+            b_x = b_x.to(device)
+            b_x = torch.unsqueeze(b_x, dim=1)  # 增加一个通道维度，如果输入需要
+
+            # 模型前向计算
+            predict = mmoe(b_x)
+
+            # 预测结果转换为 numpy 格式并存储
+            for j in range(args.tasks):
+                predictions.append(predict[j].cpu().numpy())
+
+    # 将结果转换为所需的格式输出，可以是 numpy 数组或者 DataFrame
+    predictions = np.concatenate(predictions, axis=0)  # 将各批次的预测拼接
+    result_df = pd.DataFrame(predictions, columns=[f'Task_{i + 1}_Prediction' for i in range(args.tasks)])
+
+    # 返回预测结果
+    return result_df
 
 
 def main(args):

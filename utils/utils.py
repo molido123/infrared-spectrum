@@ -66,3 +66,28 @@ def SNV(data):
     data_std = np.std(data, axis=1)
     data_average = np.mean(data, axis=1)
     return [[((value - avg) / std) for value in row] for row, avg, std in zip(data, data_average, data_std)]
+
+
+def Test_preprocess(trainData, device):
+    trainData = SNV(trainData)
+
+    scaler = StandardScaler()
+    trainData = scaler.fit_transform(trainData)
+
+    """ 
+    在机器学习中，通常使用`fit`来计算训练数据的统计信息（例如均值和标准差），
+    然后使用这些统计信息来对测试数据进行转换。因此，在给定的代码中，
+    第一行代码`scaler.fit_transform(trainData)`用于计算并应用统计信息到训练数据，
+    而第二行代码`scaler.transform(testData)`则是将相同的转换应用到测试数据上，
+    但不再需要重新计算统计信息。
+
+    此处师姐原代码应该错误，正确如上所述
+    """
+
+    trainData = torch.from_numpy(trainData).float().to(device)
+
+    """save this scaler at local for prediction"""
+    with open('scaler_test.pkl', 'wb') as f:
+        torch.save(scaler, f)
+
+    return trainData
