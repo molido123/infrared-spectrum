@@ -159,11 +159,19 @@ class CBAM(nn.Module):
 
 class PLE(nn.Module):
     def __init__(self, n_expert=1, ple_hidden_dim=125, hidden_dim=[256, 64], dropouts=[0.1, 0.1], hidden_size=125,
-                 num_task=3, output_size=1, expert_activation=None, hidden_size_gate=125):
+                 num_task=3, output_size=1, expert_activation=None, hidden_size_gate=125, num_encoder_layers=2,
+                 nhead=8):
         super(PLE, self).__init__()
 
-        # Define convolutional and pooling layers (same as before)
-        self.conv1 = DoubleConv(1, 32)
+        # 定义 Transformer Encoder 部分
+        self.embedding_dim = 32  # 定义嵌入维度
+        self.embedding_layer = nn.Conv1d(1, self.embedding_dim, kernel_size=1)
+
+        encoder_layer = nn.TransformerEncoderLayer(d_model=self.embedding_dim, nhead=nhead, dim_feedforward=512, batch_first=True)
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
+
+        # 定义卷积层和池化层（同之前的模型结构）
+        self.conv1 = DoubleConv(self.embedding_dim, 32)  # 将输入调整为 embedding_dim 以适配 Transformer 的输出
         self.att1 = CBAM(32, 1, 3)
         self.pool1 = nn.MaxPool1d(2)
         self.conv2 = DoubleConv(32, 64)
@@ -176,37 +184,24 @@ class PLE(nn.Module):
 
         self.upsam2 = nn.ConvTranspose1d(128, 32, 5, stride=4)
 
-        # self.att3 = CBAM(128, 1, 3)
         self.pool3 = nn.MaxPool1d(2)
         self.conv4 = DoubleConv(128, 256)
 
         self.upsam3 = nn.ConvTranspose1d(256, 32, 3, stride=9, padding=2)
 
-        # self.att4 = CBAM(256, 1, 3)
         self.pool4 = nn.MaxPool1d(2)
         self.conv5 = DoubleConv(256, 512)
 
-        # self.upsam3 = nn.ConvTranspose1d(512,32,5,stride=20,padding=0)
-
-        # 7 -> 15
         self.up6 = nn.ConvTranspose1d(512, 256, 3, stride=2)
-        # self.up6 = nn.ConvTranspose1d(512, 256, 5, stride=2, padding=1)
         self.conv6 = DoubleConv(512, 256)
 
-        # 15 -> 125
         self.upsam4 = nn.ConvTranspose1d(256, 32, 3, stride=9, padding=2)
-        # self.upsam4 = nn.ConvTranspose1d(256, 32, 13, stride=8)
 
-        # 15 -> 31
         self.up7 = nn.ConvTranspose1d(256, 128, 3, stride=2)
-        # self.up7 = nn.ConvTranspose1d(256, 128, 5, stride=2, padding=1)
         self.conv7 = DoubleConv(256, 128)
 
-        # 31 -> 125
         self.upsam5 = nn.ConvTranspose1d(128, 32, 5, stride=4)
-        # self.upsam5 = nn.ConvTranspose1d(128, 32, 7, stride=4, padding=1)
 
-        # 31 -> 62
         self.up8 = nn.ConvTranspose1d(128, 64, 2, stride=2)
         self.conv8 = DoubleConv(128, 64)
 
@@ -222,7 +217,6 @@ class PLE(nn.Module):
         self.expert_activation = expert_activation
         self.experts = nn.ModuleList()
 
-        # Define the experts for each level of the PLE model
         for i in range(self.num_task + 1):  # +1 for shared experts
             expert_list = []
             for j in range(n_expert):
@@ -235,7 +229,6 @@ class PLE(nn.Module):
         self.towers = nn.ModuleList()
         for i in range(self.num_task):
             tower = nn.ModuleList()
-            # hid_dim = [ple_hidden_dim] + hidden_dim
             hid_dim = [ple_hidden_dim * (n_expert + 1)] + hidden_dim
             for j in range(len(hid_dim) - 1):
                 tower.add_module('tower_hidden_{}'.format(j), nn.Linear(hid_dim[j], hid_dim[j + 1]))
@@ -245,6 +238,18 @@ class PLE(nn.Module):
             self.towers.append(tower)
 
     def forward(self, x):
+        x = self.embedding_layer(x)
+
+        # 调整输入数据格式为 (sequence_length, batch_size, embedding_dim)
+        x = x.permute(2, 0, 1)  # 调整维度顺序为 (sequence_length, batch_size, channels)
+
+        # 使用 Transformer Encoder 进行特征提取
+        x = self.transformer_encoder(x)
+
+        # 调整回卷积层输入格式 (batch_size, embedding_dim, sequence_length)
+        x = x.permute(1, 2, 0)
+
+        # 开始进入卷积部分
         c1 = self.conv1(x)
         c11 = c1
         p1 = self.pool1(c1)
@@ -287,23 +292,10 @@ class PLE(nn.Module):
                 experts_output.append(expert(x1))
             shared_output = torch.stack([expert(x1) for expert in self.shared_experts], dim=2)
 
-            # Combine task-specific and shared experts
             task_expert_output = torch.cat(experts_output + [shared_output.mean(dim=2)], dim=1)
             for mod in self.towers[i]:
-                # print(task_expert_output.shape)
                 task_expert_output = mod(task_expert_output)
             task_outputs.append(task_expert_output)
-
-        # task_loss = []
-        # for j in range(self.num_task):
-        #     a = y[:, j]
-        #     a = torch.unsqueeze(a, dim=1)
-        #     task_loss.append(self.loss_fun(a, task_outputs[j]))
-        # task_loss = torch.stack(task_loss)
-        #
-        # weighted_task_loss = torch.mul(self.weights, task_loss)
-
-        # return weighted_task_loss, task_loss, task_outputs
 
         return task_outputs
     def get_last_shared_layer(self):
