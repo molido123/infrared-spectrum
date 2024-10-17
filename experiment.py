@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.utils.data as Data
 import pandas as pd
+from sympy.stats.sampling.sample_numpy import numpy
 
 from model.UnetRemake import PLE
 from utils.utils import calcCorr, preprocess, set_seed, Test_preprocess, SNV
@@ -178,7 +179,8 @@ def trainModel(args):
 
     # --- 使用所有数据进行最终训练，并保存模型 ---
     print("Training final model with all data...")
-
+    trainData=torch.tensor(trainData, dtype=torch.float32)
+    labelData=torch.tensor(labelData, dtype=torch.float32)
     # 构建最终的 DataLoader 使用全部训练数据
     fullDataset = Data.TensorDataset(trainData, labelData)
     fullDataLoader = Data.DataLoader(dataset=fullDataset, batch_size=args.batch_size, shuffle=True)
@@ -233,10 +235,14 @@ def trainModel(args):
             
 
 
-def testModel(input_data):
+def testModel(args):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f'Testing on {device}')
-    input_data=Test_preprocess(input_data,device)
+    dataPath = f'./dataset/{args.dataset}_data.xlsx'
+    input_data=pd.read_excel(dataPath)
+    input_data=SNV(input_data)
+    input_data=np.array(input_data)
+    input_data = torch.tensor(input_data, dtype=torch.float32)
     # 将数据转换为 TensorDataset 和 DataLoader
     testDataset = Data.TensorDataset(input_data)
     testDataLoader = Data.DataLoader(dataset=testDataset, batch_size=args.batch_size, shuffle=False)
@@ -251,23 +257,33 @@ def testModel(input_data):
     # 设置模型为评估模式
     mmoe.eval()
 
-    predictions = []
+    # 假设 args.tasks 表示任务数量
+    predictions = [np.empty((0,)) for _ in range(args.tasks)]  # 初始化为空数组
 
     # 对测试数据进行前向传播，获取预测结果
     with torch.no_grad():
         for idx, (b_x,) in enumerate(testDataLoader):
             b_x = b_x.to(device)
-            b_x = torch.unsqueeze(b_x, dim=1)  # 增加一个通道维度，如果输入需要
+            b_x = torch.unsqueeze(b_x, dim=1)  # 如果需要，增加一个通道维度
 
             # 模型前向计算
             predict = mmoe(b_x)
 
             # 预测结果转换为 numpy 格式并存储
             for j in range(args.tasks):
-                predictions.append(predict[j].cpu().numpy())
+                # 假设每个任务的输出是 predict[j]
+                tmp = torch.squeeze(predict[j], dim=1)  # 去掉多余维度
+
+                # 如果 predictions[j] 为空数组，直接赋值，不进行拼接
+                if predictions[j].size == 0:
+                    predictions[j] = tmp.cpu().numpy()
+                else:
+                    # 否则进行拼接
+                    predictions[j] = np.concatenate((predictions[j], tmp.cpu().numpy()), axis=0)
 
     # 将结果转换为所需的格式输出，可以是 numpy 数组或者 DataFrame
-    predictions = np.concatenate(predictions, axis=0)  # 将各批次的预测拼接
+    predictions=np.array(predictions)
+    predictions=predictions.T
     result_df = pd.DataFrame(predictions, columns=[f'Task_{i + 1}_Prediction' for i in range(args.tasks)])
 
     # 返回预测结果
@@ -279,8 +295,8 @@ def main(args):
     main 函数定义了 *args, 这意味着你可以传递任意数量的参数给 main 函数.
     这些参数会被打包成一个元组传递给 trainModel 函数
     """
-    trainModel(args)
-    testModel()
+    # trainModel(args)
+    testModel(args)
 
 
 if __name__ == '__main__':
@@ -288,7 +304,7 @@ if __name__ == '__main__':
     praser = argparse.ArgumentParser(description='Train the Multi-Task Model')
     praser.add_argument('--tasks', type=int, default=3, help='the number of tasks')
     praser.add_argument('--lr', type=float, default=1e-2, help='training learning rate')
-    praser.add_argument('--epoch', type=int, default=250, help='training epoch')
+    praser.add_argument('--epoch', type=int, default=5, help='training epoch')
     praser.add_argument('--batch_size', type=int, default=32, help='training batch size')
     praser.add_argument('--alpha', type=float, default=0.5, help='loss function weight')
     praser.add_argument('--gamma', type=float, default=0.9, help='scheduler gamma')
