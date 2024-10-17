@@ -188,7 +188,7 @@ def trainModel(args):
     mmoe = PLE(num_task=args.tasks).to(device)
     optimizer = torch.optim.Adam(mmoe.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=args.gamma)
-
+    min_loss=1e9
     # 训练模型（使用所有数据）
     for epoch in range(args.epoch):
         mmoe.train()
@@ -225,12 +225,16 @@ def trainModel(args):
             count += b_x.size(0)
 
         scheduler.step()
+        if total_loss<min_loss:
+            min_loss=total_loss
+            # 保存模型到指定路径
+            torch.save(mmoe.state_dict(), './checkpoint/model_final.pth')
+
         print(f'Epoch {epoch + 1} - Final Train Loss: {total_loss / count:.4f}')
         for j in range(args.tasks):
             print(f'{task_names[j]} Final R_train: {R_task_train[j] / count:.4f}')
 
     # 保存模型到指定路径
-    torch.save(mmoe.state_dict(), './checkpoint/model_final.pth')
     print("Final model saved as 'model_final.pth'.")
             
 
@@ -285,7 +289,7 @@ def testModel(args):
     predictions=np.array(predictions)
     predictions=predictions.T
     result_df = pd.DataFrame(predictions, columns=[f'Task_{i + 1}_Prediction' for i in range(args.tasks)])
-
+    result_df.to_excel('result.xlsx', index=False)
     # 返回预测结果
     return result_df
 
@@ -295,8 +299,8 @@ def main(args):
     main 函数定义了 *args, 这意味着你可以传递任意数量的参数给 main 函数.
     这些参数会被打包成一个元组传递给 trainModel 函数
     """
-    # trainModel(args)
-    testModel(args)
+    trainModel(args)
+    # testModel(args)
 
 
 if __name__ == '__main__':
