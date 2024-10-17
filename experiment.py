@@ -185,13 +185,14 @@ def trainModel(args):
     fullDataset = Data.TensorDataset(trainData, labelData)
     fullDataLoader = Data.DataLoader(dataset=fullDataset, batch_size=args.batch_size, shuffle=True)
 
-    mmoe = PLE(num_task=args.tasks).to(device)
-    optimizer = torch.optim.Adam(mmoe.parameters(), lr=args.lr)
+    ple_train = PLE(num_task=args.tasks).to(device)
+    optimizer = torch.optim.Adam(ple_train.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=args.gamma)
     min_loss=1e9
+    ple_train.train()
+    initial_task_loss=None
     # 训练模型（使用所有数据）
     for epoch in range(args.epoch):
-        mmoe.train()
         total_loss = 0
         R_task_train = [0] * args.tasks
         count = 0
@@ -200,7 +201,7 @@ def trainModel(args):
             b_x = torch.unsqueeze(b_x, dim=1)  # 增加一个通道维度
 
             # 模型前向计算
-            predict = mmoe(b_x)
+            predict = ple_train(b_x)
 
             # 计算每个任务的损失
             task_loss = []
@@ -210,12 +211,34 @@ def trainModel(args):
                 task_loss.append(criterion(a, predict[j]))
             task_loss = torch.stack(task_loss)
 
+            # 如果是第一个epoch的第一个batch，初始化 initial_task_loss
+            if initial_task_loss is None:
+                initial_task_loss = task_loss.detach().cpu().numpy()
+
             # 计算加权损失
-            weighted_task_loss = torch.mul(mmoe.weights, task_loss)
+            weighted_task_loss = torch.mul(ple_train.weights, task_loss)
             loss = torch.sum(weighted_task_loss)
 
             optimizer.zero_grad()
             loss.backward(retain_graph=True)
+
+            if args.mode == 'grad_norm':
+                W = ple_train.get_last_shared_layer()
+                norms = []
+                for j in range(args.tasks):
+                    gLgW = torch.autograd.grad(task_loss[j], W.parameters(), retain_graph=True)
+                    norms.append(torch.norm(torch.mul(ple_train.weights[j], gLgW[0])))
+                norms = torch.stack(norms)
+
+                loss_ratio = task_loss.detach().cpu().numpy() / initial_task_loss
+                inverse_train_rate = loss_ratio / np.mean(loss_ratio)
+
+                mean_norm = np.mean(norms.detach().cpu().numpy())
+                constant_term = torch.tensor(mean_norm * (inverse_train_rate ** args.alpha), requires_grad=True).to(
+                    device)
+                grad_norm_loss = torch.sum(torch.abs(norms - constant_term))
+                ple_train.weights.grad = torch.autograd.grad(grad_norm_loss, ple_train.weights)[0]
+
             optimizer.step()
 
             # 修正后的 total_loss 计算逻辑
@@ -224,11 +247,14 @@ def trainModel(args):
                 R_task_train[j] += calcCorr(predict[j], b_y[:, j]).item() ** 2 * b_x.size(0)
             count += b_x.size(0)
 
+            normalize_coeff = args.tasks / torch.sum(ple_train.weights.data, dim=0)
+            ple_train.weights.data *= normalize_coeff
+
         scheduler.step()
         if total_loss<min_loss:
             min_loss=total_loss
             # 保存模型到指定路径
-            torch.save(mmoe.state_dict(), './checkpoint/model_final.pth')
+            torch.save(ple_train.state_dict(), './checkpoint/model_final.pth')
 
         print(f'Epoch {epoch + 1} - Final Train Loss: {total_loss / count:.4f}')
         for j in range(args.tasks):
@@ -308,7 +334,7 @@ if __name__ == '__main__':
     praser = argparse.ArgumentParser(description='Train the Multi-Task Model')
     praser.add_argument('--tasks', type=int, default=3, help='the number of tasks')
     praser.add_argument('--lr', type=float, default=1e-2, help='training learning rate')
-    praser.add_argument('--epoch', type=int, default=5, help='training epoch')
+    praser.add_argument('--epoch', type=int, default=1, help='training epoch')
     praser.add_argument('--batch_size', type=int, default=32, help='training batch size')
     praser.add_argument('--alpha', type=float, default=0.5, help='loss function weight')
     praser.add_argument('--gamma', type=float, default=0.9, help='scheduler gamma')
